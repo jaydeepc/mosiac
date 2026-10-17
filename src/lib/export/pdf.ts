@@ -14,9 +14,16 @@ async function launchBrowser(): Promise<Browser> {
   if (serverless) {
     const chromium = (await import("@sparticuz/chromium")).default;
     const puppeteer = (await import("puppeteer-core")).default;
+    // Bundlers often drop the brotli-packed binary; when it is missing, fetch the matching pack
+    // once per instance into /tmp (≈70 MB) instead of failing.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const localBin = path.join(process.cwd(), "node_modules", "@sparticuz", "chromium", "bin");
+    const packUrl = process.env.CHROMIUM_PACK_URL || "https://github.com/Sparticuz/chromium/releases/download/v153.0.0/chromium-v153.0.0-pack.x64.tar";
+    const executablePath = fs.existsSync(localBin) ? await chromium.executablePath() : await chromium.executablePath(packUrl);
     return puppeteer.launch({
       args: [...chromium.args, "--font-render-hinting=none"],
-      executablePath: await chromium.executablePath(),
+      executablePath,
       headless: true,
     }) as unknown as Promise<Browser>;
   }

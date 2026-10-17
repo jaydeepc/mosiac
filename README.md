@@ -32,6 +32,21 @@ Open http://localhost:3000. The admin account is created on first run from `ADMI
 
 PDF export uses headless Chrome via Puppeteer (downloaded automatically by `npm install`). On a server without it, set `PUPPETEER_EXECUTABLE_PATH`.
 
+## Deploying to Vercel
+
+The app is deployed at **https://mosaic-beta-ochre.vercel.app** (Vercel project `mosaic`, region `bom1`).
+
+```bash
+vercel link --project mosaic
+vercel env add MONGODB_URI production   # repeat for each variable in .env.example
+vercel --prod
+```
+
+- MongoDB Atlas → **Network Access** must allow `0.0.0.0/0`: Vercel functions use changing egress IPs, and Atlas answers an unlisted IP with a TLS alert (`SSL alert number 80`).
+- PDF export runs headless Chromium from `@sparticuz/chromium` (Node 22). Vercel's bundler drops the packed binary, so the first export on a cold instance downloads the matching pack (~70 MB) into `/tmp`; later exports reuse it. Override the pack with `CHROMIUM_PACK_URL`.
+- `vercel.json` sets 300 s / 1769 MB for the API routes. The Hobby plan clamps durations to its own limit.
+- `APP_URL` is optional on Vercel; the production URL is derived from `VERCEL_PROJECT_PRODUCTION_URL`.
+
 ## Configuration (`.env.local`)
 
 | Variable | Purpose |
