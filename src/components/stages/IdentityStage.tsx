@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { StageShell } from "@/components/stage/StageShell";
 import { PaperPreview } from "@/components/preview/PaperPreview";
 import { FunFacts } from "@/components/FunFacts";
@@ -22,7 +22,7 @@ const STRENGTH_TEXT: Record<Candidate["strength"], { label: string; color: strin
 const AVATARS = ["linear-gradient(135deg, #DCE3F5, #9CC3C5)", "linear-gradient(135deg, #F6E3D3, #E7B99E)", "linear-gradient(135deg, #EEEBE3, #D9D5CC)"];
 
 export function IdentityStage({ initial }: { initial: ProjectJSON }) {
-  const router = useRouter();
+  const { go, pending: navPending } = useNavigate();
   const { project, setProject, refresh } = useProject(initial.id, initial);
   const p = project ?? initial;
   const research = p.research;
@@ -55,6 +55,17 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
 
   const liCandidates = useMemo(() => (research?.candidates ?? []).filter((c) => c.group === "linkedin"), [research]);
   const webCandidates = useMemo(() => (research?.candidates ?? []).filter((c) => c.group === "web"), [research]);
+  const recentCut = new Date().getFullYear() - 2;
+  const byDate = (a: Candidate, b: Candidate) => (b.date ?? "").localeCompare(a.date ?? "");
+  const recentWeb = useMemo(() => webCandidates.filter((c) => c.date && parseInt(c.date.slice(0, 4), 10) >= recentCut).sort(byDate), [webCandidates, recentCut]);
+  const earlierWeb = useMemo(() => webCandidates.filter((c) => c.date && parseInt(c.date.slice(0, 4), 10) < recentCut).sort(byDate), [webCandidates, recentCut]);
+  const undatedWeb = useMemo(() => webCandidates.filter((c) => !c.date), [webCandidates]);
+  const toggleAll = (list: Candidate[], on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const c of list) if (on) next.add(c.id); else next.delete(c.id);
+      return next;
+    });
   const tickCount = selected.size + (linkedin && linkedin !== "none" ? 1 : 0);
 
   async function addLink() {
@@ -80,10 +91,10 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
     try {
       if (!skipWeb) {
         await api(`/api/projects/${p.id}/sources`, { method: "PATCH", json: { selectedIds: [...selected], linkedinChoice: linkedin || "none" } });
-        router.push(`/m/${p.id}/reading`);
+        go(`/m/${p.id}/reading`);
       } else {
         await api(`/api/projects/${p.id}`, { method: "PATCH", json: { stage: 4, linkedinChoice: "none", readingStatus: "done" } });
-        router.push(`/m/${p.id}/talk`);
+        go(`/m/${p.id}/talk`);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -115,7 +126,7 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
                 <strong className="text-ink">
                   {research.pagesChecked} pages checked, {research.candidates.length} worth showing
                 </strong>
-                . Tell me which are yours; I only read inside the ones you tick.
+                . Tell me which are yours; I only read inside the ones you tick, and I open the pages they link to as well.
               </>
             )}
           </>
@@ -127,8 +138,8 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
       asideFlex="1 1 440px"
       footer={
         <>
-          <button type="button" className="btn-primary" disabled={busy || running || tickCount === 0} onClick={() => proceed(false)}>
-            {busy ? <Spinner light /> : null} Read the ticked ones <ArrowRight size={16} />
+          <button type="button" className="btn-primary" disabled={busy || navPending || running || tickCount === 0} onClick={() => proceed(false)}>
+            {busy || navPending ? <Spinner light /> : null} Read the ticked ones <ArrowRight size={16} />
           </button>
           <span className="text-[13px] text-muted">{tickCount === 0 ? "Tick at least one page, or skip" : `${tickCount} page${tickCount === 1 ? "" : "s"} ticked · I'll show you exactly what I take from each`}</span>
           <button type="button" className="btn-ghost ml-auto" disabled={busy} onClick={() => proceed(true)}>
@@ -217,39 +228,32 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
           <fieldset className="m-0 card flex flex-col gap-2.5" style={{ padding: "18px 20px" }}>
             <legend className="px-1.5 text-[13px] font-bold text-muted">Elsewhere on the web — tick all that are yours</legend>
             {webCandidates.length === 0 && <p className="m-0 text-[13px] text-muted">Nothing beyond LinkedIn turned up. Add a link if you have one — a portfolio, a talk, a paper, press.</p>}
-            {webCandidates.map((c) => {
-              const on = selected.has(c.id);
-              const st = STRENGTH_TEXT[c.strength];
-              return (
-                <label key={c.id} className="flex gap-3 items-start rounded-xl cursor-pointer transition-colors" style={{ padding: "12px 14px", border: on ? "1.5px solid #2F6F73" : "1px solid #E6E2DA", background: "#FFF" }}>
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={(e) => {
+            {webCandidates.length > 0 && (
+              <div className="flex items-center gap-3 text-xs text-muted flex-wrap">
+                <span>{webCandidates.length} pages, newest first. Recent pages usually hold your latest talks and roles.</span>
+                <button type="button" className="link-btn text-xs" onClick={() => toggleAll(webCandidates, true)}>Tick all</button>
+                <button type="button" className="link-btn text-xs" onClick={() => toggleAll(webCandidates, false)}>Untick all</button>
+              </div>
+            )}
+            {[
+              { label: `Most recent · ${recentCut}–${new Date().getFullYear()}`, list: recentWeb },
+              { label: "Earlier", list: earlierWeb },
+              { label: "Undated", list: undatedWeb },
+            ]
+              .filter((g) => g.list.length)
+              .map((g) => (
+                <div key={g.label} className="flex flex-col gap-2.5">
+                  {(recentWeb.length + earlierWeb.length > 0) && <h3 className="m-0 mt-1 text-[11px] font-bold tracking-[0.08em] uppercase text-muted">{g.label}</h3>}
+                  {g.list.map((c) => (
+                    <CandidateRow key={c.id} c={c} on={selected.has(c.id)} onToggle={(checked) => {
                       const next = new Set(selected);
-                      if (e.target.checked) next.add(c.id);
+                      if (checked) next.add(c.id);
                       else next.delete(c.id);
                       setSelected(next);
-                    }}
-                    style={{ width: 20, height: 20, margin: "1px 0 0", accentColor: "#2F6F73" }}
-                  />
-                  <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-                    <span className="text-[11px] font-bold text-muted">
-                      {c.kind} · {c.source} ·{" "}
-                      <span style={{ color: c.addedByUser ? "#2F6F73" : st.color }}>{c.addedByUser ? "Added by you" : st.label}</span>
-                    </span>
-                    <strong className="text-sm">{c.title}</strong>
-                    <span className="text-xs text-muted">
-                      {c.subtitle ? `${c.subtitle} — ` : ""}
-                      {c.why.replace(/^Why:\s*/i, "")}
-                    </span>
-                    <a href={c.url} target="_blank" rel="noreferrer" className="text-xs font-semibold self-start" onClick={(e) => e.stopPropagation()}>
-                      Open page ↗
-                    </a>
-                  </span>
-                </label>
-              );
-            })}
+                    }} />
+                  ))}
+                </div>
+              ))}
             <button type="button" className="flex items-center gap-2 self-start rounded-full text-[13px] font-semibold text-muted" style={{ padding: "10px 14px", border: "1px dashed #D9D5CC", background: "transparent", font: "inherit", fontSize: 13, fontWeight: 600 }} onClick={() => setAddOpen(addOpen === "web" ? null : "web")}>
               <Plus size={14} /> Add a link I missed — portfolio, paper, press
             </button>
@@ -281,5 +285,32 @@ function AddLink({ value, onChange, onAdd, busy, placeholder }: { value: string;
         {busy ? <Spinner light /> : <Plus size={14} />} Add
       </button>
     </div>
+  );
+}
+
+function CandidateRow({ c, on, onToggle }: { c: Candidate; on: boolean; onToggle: (checked: boolean) => void }) {
+  const st = STRENGTH_TEXT[c.strength];
+  return (
+    <label className="flex gap-3 items-start rounded-xl cursor-pointer transition-colors" style={{ padding: "12px 14px", border: on ? "1.5px solid #2F6F73" : "1px solid #E6E2DA", background: "#FFF" }}>
+      <input type="checkbox" checked={on} onChange={(e) => onToggle(e.target.checked)} style={{ width: 20, height: 20, margin: "1px 0 0", accentColor: "#2F6F73" }} />
+      <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <span className="text-[11px] font-bold text-muted flex items-center gap-1.5 flex-wrap">
+          {c.kind} · {c.source} · <span style={{ color: c.addedByUser ? "#2F6F73" : st.color }}>{c.addedByUser ? "Added by you" : st.label}</span>
+          {c.date && (
+            <span className="rounded-full font-bold" style={{ padding: "1px 7px", background: "#EEF3F1", color: "#2F6F73" }}>
+              {c.date}
+            </span>
+          )}
+        </span>
+        <strong className="text-sm">{c.title}</strong>
+        <span className="text-xs text-muted">
+          {c.subtitle ? `${c.subtitle} — ` : ""}
+          {c.why.replace(/^Why:\s*/i, "")}
+        </span>
+        <a href={c.url} target="_blank" rel="noreferrer" className="text-xs font-semibold self-start" onClick={(e) => e.stopPropagation()}>
+          Open page ↗
+        </a>
+      </span>
+    </label>
   );
 }

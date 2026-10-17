@@ -8,18 +8,19 @@ export interface PageRead {
   title: string;
   text: string;
   via: "fetch" | "search";
+  links?: { url: string; title: string }[];
 }
 
-/** Reads a page's visible text. Falls back to web-grounded summarisation when a site blocks bots (LinkedIn, Medium). */
-export async function readPage(url: string, hint?: string): Promise<PageRead> {
-  const direct = await fetchVisibleText(url).catch(() => null);
+/** Reads a page's visible text. Falls back to web-grounded reading when a site blocks bots (LinkedIn, Medium). */
+export async function readPage(url: string, hint?: string, personName?: string): Promise<PageRead> {
+  const isLinkedIn = /linkedin\.com\/(in|pub)\//.test(url);
+  const direct = isLinkedIn ? null : await fetchVisibleText(url).catch(() => null);
   if (direct && direct.text.length > 400 && !looksLikeWall(direct.text)) return direct;
-  const res = await research(
-    `Open and read this exact page: ${url}\n${hint ? `It is believed to be: ${hint}\n` : ""}Report, as plain text and as completely as you can, the professional content on it: name, headline, roles with companies and dates, descriptions of work, numbers/metrics, talks, articles, projects, education, certifications, awards. Also report anything that looks personal or irrelevant to a career (so it can be left out). If the page is unavailable, say exactly "PAGE UNAVAILABLE" and describe what search results say about it instead.`,
-    "You read web pages for a resume assistant. Report only what the page actually says. Never invent roles, dates or numbers.",
-    3000,
-  );
-  return { url, title: direct?.title || hostOf(url), text: res.content, via: "search" };
+  const prompt = isLinkedIn
+    ? `Read the public LinkedIn profile at ${url}${personName ? ` (${personName})` : ""}, using search to retrieve as much of it as is public: the headline, the About section, EVERY experience entry with company, title and dates, education, certifications, licences, volunteering, featured items, publications, honours, languages, and the themes and dates of their recent posts and activity. Report everything as plain text, grouped under those headings, keeping dates. Then list separately what is vanity or status (follower count, endorsements, "open to work"). If the profile cannot be read at all, say exactly "PAGE UNAVAILABLE" and report what search results say about this person instead.`
+    : `Open and read this exact page: ${url}\n${hint ? `It is believed to be: ${hint}\n` : ""}Report, as plain text and as completely as you can, the professional content on it: name, headline, roles with companies and dates, descriptions of work, numbers/metrics, every talk/article/project listed with its date, education, certifications, awards. Also report anything that looks personal or irrelevant to a career (so it can be left out). If the page is unavailable, say exactly "PAGE UNAVAILABLE" and describe what search results say about it instead.`;
+  const res = await research(prompt, "You read web pages for a resume assistant. Report only what the page actually says. Never invent roles, dates or numbers.", 5000);
+  return { url, title: direct?.title || hostOf(url), text: res.content, via: "search", links: direct?.links };
 }
 
 function looksLikeWall(t: string) {
@@ -39,6 +40,19 @@ export async function fetchVisibleText(url: string): Promise<PageRead> {
     $("script, style, noscript, svg, nav, footer, header, iframe, form, [role=navigation], [aria-hidden=true]").remove();
     const title = $("title").first().text().trim() || $("h1").first().text().trim() || hostOf(url);
     const root = $("main").length ? $("main") : $("article").length ? $("article") : $("body");
+    const base = new URL(url);
+    const links: { url: string; title: string }[] = [];
+    root.find("a[href]").each((_, a) => {
+      const href = $(a).attr("href") ?? "";
+      const t = $(a).text().replace(/\s+/g, " ").trim();
+      if (!t || t.length < 3 || /^(#|mailto:|tel:|javascript:)/i.test(href)) return;
+      try {
+        const abs = new URL(href, base).toString();
+        if (abs.startsWith("http") && !links.some((l) => l.url === abs)) links.push({ url: abs, title: t.slice(0, 120) });
+      } catch {
+        /* ignore */
+      }
+    });
     const text = root
       .text()
       .replace(/\s+\n/g, "\n")
@@ -46,7 +60,7 @@ export async function fetchVisibleText(url: string): Promise<PageRead> {
       .replace(/[ \t]{2,}/g, " ")
       .trim()
       .slice(0, 20000);
-    return { url, title, text, via: "fetch" };
+    return { url, title, text, via: "fetch", links: links.slice(0, 150) };
   } finally {
     clearTimeout(t);
   }

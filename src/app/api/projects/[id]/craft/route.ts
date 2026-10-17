@@ -1,6 +1,6 @@
 import { withAuth, loadProject, sse } from "@/lib/api";
 import { projects } from "@/lib/db";
-import { craftResume, craftInLanguage } from "@/lib/ai/stages";
+import { craftResume, craftInLanguage, sharpenResume } from "@/lib/ai/stages";
 import { generateStoredArt } from "@/lib/art";
 
 export const maxDuration = 300;
@@ -25,6 +25,13 @@ export const POST = withAuth(async (session, req: Request, ctx: Ctx) => {
       const p = (await col.findOne({ _id: start._id }))!;
       send("status", { line: `Aiming the story at ${p.targetRole ?? "your next role"}…` });
       resume = await craftResume(p, p.outputLanguage, look);
+      send("resume", { resume });
+      send("status", { line: "Sharpening every line — outcome first, no filler…" });
+      try {
+        resume = await sharpenResume(p, resume);
+      } catch (e) {
+        console.warn("[craft] sharpen failed:", (e as Error).message);
+      }
       await col.updateOne({ _id: start._id }, { $set: { resume, comments: [], updatedAt: new Date() } });
       send("resume", { resume });
     } else if (resume) {

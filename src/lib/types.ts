@@ -128,6 +128,7 @@ export interface Candidate {
   url: string;
   strength: "strong" | "possible" | "unlikely";
   why: string;
+  date?: string; // "YYYY" or "YYYY-MM" when the page shows one
   addedByUser?: boolean;
   selected?: boolean;
 }
@@ -142,6 +143,7 @@ export interface Extraction {
   willAsk: string[];
   note?: string; // for "nothing taken" explanation
   useAnyway?: boolean;
+  followed?: { url: string; title: string }[]; // linked pages Mosaic also opened
 }
 
 /* ---------- Stage 4 ---------- */

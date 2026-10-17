@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { StageShell } from "@/components/stage/StageShell";
 import { ArrowRight, Person, Spinner } from "@/components/Icons";
 import { api, useProject } from "@/lib/client";
@@ -10,7 +10,7 @@ import type { ProjectJSON } from "@/lib/types";
 import { LookPreview } from "@/components/preview/LookPreview";
 
 export function LookStage({ initial }: { initial: ProjectJSON }) {
-  const router = useRouter();
+  const { go, pending: navPending } = useNavigate();
   const { project, setProject, patch } = useProject(initial.id, initial);
   const p = project ?? initial;
   const [look, setLook] = useState<"visual" | "classic">(p.look);
@@ -49,12 +49,13 @@ export function LookStage({ initial }: { initial: ProjectJSON }) {
           <button
             type="button"
             className="btn-primary"
+            disabled={navPending}
             onClick={async () => {
               await patch({ look, secondLanguage: second || undefined, outputLanguage: output, stage: 7 } as Partial<ProjectJSON>);
-              router.push(`/m/${p.id}/craft`);
+              go(`/m/${p.id}/craft`);
             }}
           >
-            Craft my Mosaic <ArrowRight size={16} />
+            {navPending ? <Spinner light /> : null} Craft my Mosaic <ArrowRight size={16} />
           </button>
           <span className="text-sm text-muted">Takes about a minute. You can switch looks later without losing anything.</span>
         </>

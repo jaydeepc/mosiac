@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { StageShell } from "@/components/stage/StageShell";
 import { PaperPreview } from "@/components/preview/PaperPreview";
 import { FunFacts } from "@/components/FunFacts";
@@ -18,7 +18,7 @@ const SHAPES = [
 ] as const;
 
 export function AimStage({ initial }: { initial: ProjectJSON }) {
-  const router = useRouter();
+  const { go, pending: navPending } = useNavigate();
   const { project, setProject } = useProject(initial.id, initial);
   const p = project ?? initial;
   const [role, setRole] = useState(p.targetRole ?? "");
@@ -141,14 +141,14 @@ export function AimStage({ initial }: { initial: ProjectJSON }) {
           <button
             type="button"
             className="btn-primary"
-            disabled={!role.trim() || aiming}
+            disabled={!role.trim() || aiming || navPending}
             onClick={async () => {
               await aim(role, jd);
               await api(`/api/projects/${p.id}`, { method: "PATCH", json: { shape, stage: 6 } });
-              router.push(`/m/${p.id}/look`);
+              go(`/m/${p.id}/look`);
             }}
           >
-            {aiming ? <Spinner light /> : null} Aim it here <ArrowRight size={16} />
+            {aiming || navPending ? <Spinner light /> : null} Aim it here <ArrowRight size={16} />
           </button>
           <span className="text-sm text-muted">You can make a second version for another role later.</span>
         </>

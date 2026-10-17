@@ -194,14 +194,14 @@ export async function decide<T>(system: string, user: string, maxTokens = 2500):
 }
 
 /* ------------------------------ Research ------------------------------ */
-export async function research(prompt: string, system?: string, maxTokens = 3500): Promise<ChatResult> {
+export async function research(prompt: string, system?: string, maxTokens = 3500, web: { engine?: string; includeDomains?: string[]; maxResults?: number } = {}): Promise<ChatResult> {
   return chat({
     model: config.models.research,
     messages: [
       { role: "system", content: system ?? "You are a careful research assistant. Use web search. Only report pages you actually found; never invent URLs." },
       { role: "user", content: prompt },
     ],
-    web: true,
+    web: Object.keys(web).length ? web : true,
     maxTokens: Math.max(maxTokens, 6000),
     temperature: 0.2,
     // Grounded models otherwise spend the whole budget thinking about the search results.

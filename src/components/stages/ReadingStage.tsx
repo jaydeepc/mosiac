@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { StageShell } from "@/components/stage/StageShell";
 import { PaperPreview } from "@/components/preview/PaperPreview";
 import { FunFacts } from "@/components/FunFacts";
@@ -10,10 +10,10 @@ import { api, sseStream, useProject } from "@/lib/client";
 import type { Extraction, Profile, ProjectJSON } from "@/lib/types";
 
 export function ReadingStage({ initial }: { initial: ProjectJSON }) {
-  const router = useRouter();
+  const { go, pending: navPending } = useNavigate();
   const { project, setProject, refresh } = useProject(initial.id, initial);
   const p = project ?? initial;
-  const [status, setStatus] = useState<{ done: number; total: number; current?: string } | null>(null);
+  const [status, setStatus] = useState<{ done: number; total: number; current?: string; line?: string } | null>(null);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export function ReadingStage({ initial }: { initial: ProjectJSON }) {
         setProject((prev) => (prev ? { ...prev, extractions: d.extractions as Extraction[], readingStatus: "running" } : prev));
         setStatus({ done: 0, total: d.total as number });
       } else if (ev === "reading") {
-        setStatus({ done: d.done as number, total: d.total as number, current: d.title as string });
+        setStatus({ done: d.done as number, total: d.total as number, current: d.title as string, line: d.line as string | undefined });
         setProject((prev) => (prev ? { ...prev, extractions: prev.extractions.map((e) => (e.candidateId === d.candidateId ? { ...e, status: "reading" } : e)) } : prev));
       } else if (ev === "read") {
         const ex = d.extraction as Extraction;
@@ -88,10 +88,10 @@ export function ReadingStage({ initial }: { initial: ProjectJSON }) {
       backHref={`/m/${p.id}/identity`}
       footer={
         <>
-          <button type="button" className="btn-primary" disabled={running} onClick={() => router.push(`/m/${p.id}/talk`)}>
-            Looks right, let&apos;s talk <ArrowRight size={16} />
+          <button type="button" className="btn-primary" disabled={running || navPending} onClick={() => go(`/m/${p.id}/talk`)}>
+            {navPending ? <Spinner light /> : null} Looks right, let&apos;s talk <ArrowRight size={16} />
           </button>
-          <button type="button" className="btn-secondary" onClick={() => router.push(`/m/${p.id}/identity`)}>
+          <button type="button" className="btn-secondary" onClick={() => go(`/m/${p.id}/identity`)}>
             Change my ticks
           </button>
         </>
@@ -110,7 +110,7 @@ export function ReadingStage({ initial }: { initial: ProjectJSON }) {
             <strong>
               {status?.done ?? 0} of {status?.total ?? p.extractions.length} pages read
             </strong>
-            {current ? ` · now reading ${current.title.toLowerCase()}…` : " · opening the first page…"}
+            {current ? ` · ${status?.line ?? `now reading ${current.title.toLowerCase()}…`}` : " · opening the first page…"}
           </span>
           <span className="ml-auto text-xs text-muted">{elapsed} s</span>
         </div>
@@ -184,6 +184,17 @@ export function ReadingStage({ initial }: { initial: ProjectJSON }) {
               </div>
             ) : null}
 
+            {ex.followed && ex.followed.length > 0 && (
+              <div className="text-xs text-muted">
+                Also opened {ex.followed.length} linked page{ex.followed.length === 1 ? "" : "s"}:{" "}
+                {ex.followed.map((f, i) => (
+                  <span key={f.url}>
+                    <a href={f.url} target="_blank" rel="noreferrer">{f.title || f.url}</a>
+                    {i < ex.followed!.length - 1 ? ", " : ""}
+                  </span>
+                ))}
+              </div>
+            )}
             {ex.status === "reading" && <div className="rounded-xl text-[13px] leading-[1.5] text-muted" style={{ padding: "10px 12px", background: "#F7F5EF" }}>Opening the page and deciding what fits. If nothing here belongs in {seniority}, I&apos;ll leave it all out and say so — even though you ticked it.</div>}
           </li>
         ))}

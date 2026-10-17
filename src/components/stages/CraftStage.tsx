@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Wordmark, MosaicMark } from "@/components/Mark";
 import { ProgressBars } from "@/components/stage/StageShell";
@@ -16,7 +16,7 @@ import { languageLabel } from "@/lib/config";
 import type { Comment, ProjectJSON, ResumeDoc } from "@/lib/types";
 
 export function CraftStage({ initial }: { initial: ProjectJSON }) {
-  const router = useRouter();
+  const { go, pending: navPending } = useNavigate();
   const mobile = useIsMobile();
   const { project, setProject, refresh } = useProject(initial.id, initial);
   const p = project ?? initial;
@@ -263,7 +263,7 @@ export function CraftStage({ initial }: { initial: ProjectJSON }) {
 
   const finish = async () => {
     await api(`/api/projects/${p.id}`, { method: "PATCH", json: { stage: 8 } });
-    router.push(`/m/${p.id}/ready`);
+    go(`/m/${p.id}/ready`);
   };
 
   if (mobile) {
@@ -275,7 +275,7 @@ export function CraftStage({ initial }: { initial: ProjectJSON }) {
               <ArrowLeft size={20} />
             </Link>
             <span className="text-sm font-bold">7 of 8 · Craft</span>
-            <button type="button" disabled={crafting || !doc} onClick={finish} className="rounded-full border-0 text-white text-[13px] font-bold" style={{ padding: "8px 14px", background: "#2F6F73", font: "inherit", fontSize: 13, fontWeight: 700 }}>
+            <button type="button" disabled={crafting || !doc || navPending} onClick={finish} className="rounded-full border-0 text-white text-[13px] font-bold" style={{ padding: "8px 14px", background: "#2F6F73", font: "inherit", fontSize: 13, fontWeight: 700 }}>
               Finish
             </button>
           </div>
@@ -307,7 +307,7 @@ export function CraftStage({ initial }: { initial: ProjectJSON }) {
               <button type="button" className="btn-secondary flex-1" style={{ fontSize: 13 }} onClick={() => setMobilePanel(mobilePanel === "paper" ? "comments" : "paper")}>
                 <CommentIcon size={14} /> {mobilePanel === "paper" ? `Comments${p.comments.length ? ` (${p.comments.length})` : ""}` : "Back to the page"}
               </button>
-              <button type="button" className="btn-primary flex-1" style={{ fontSize: 13 }} disabled={crafting || !doc} onClick={finish}>
+              <button type="button" className="btn-primary flex-1" style={{ fontSize: 13 }} disabled={crafting || !doc || navPending} onClick={finish}>
                 Finish <ArrowRight size={14} />
               </button>
             </div>
@@ -328,8 +328,8 @@ export function CraftStage({ initial }: { initial: ProjectJSON }) {
         </div>
         <div className="flex items-center gap-2.5">
           {toggles}
-          <button type="button" disabled={crafting || !doc} onClick={finish} className="inline-flex items-center gap-2 rounded-full border-0 text-white text-[13px] font-bold" style={{ padding: "9px 16px", background: "#2F6F73", font: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: crafting ? 0.6 : 1 }}>
-            Finish <ArrowRight size={14} strokeWidth={2.4} />
+          <button type="button" disabled={crafting || !doc || navPending} onClick={finish} className="inline-flex items-center gap-2 rounded-full border-0 text-white text-[13px] font-bold" style={{ padding: "9px 16px", background: "#2F6F73", font: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: crafting ? 0.6 : 1 }}>
+            {navPending ? <Spinner light size={14} /> : null} Finish <ArrowRight size={14} strokeWidth={2.4} />
           </button>
         </div>
       </header>

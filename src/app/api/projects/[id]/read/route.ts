@@ -37,7 +37,7 @@ export const POST = withAuth(async (session, req: Request, ctx: Ctx) => {
       send("reading", { candidateId: c.id, title: extractions[idx].title, done, total: toRead.length });
       try {
         p = (await col.findOne({ _id: p._id }))!;
-        const { extraction, profile } = await readSource(p, c);
+        const { extraction, profile } = await readSource(p, c, (line) => send("reading", { candidateId: c.id, title: extractions[idx].title, done, total: toRead.length, line }));
         extractions[idx] = extraction;
         done++;
         await col.updateOne({ _id: p._id }, { $set: { extractions, profile, updatedAt: new Date() } });

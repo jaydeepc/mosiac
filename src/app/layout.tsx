@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Newsreader, Manrope } from "next/font/google";
 import "./globals.css";
+import { Suspense } from "react";
+import { NavProvider } from "@/components/nav/NavProgress";
 
 const newsreader = Newsreader({
   variable: "--font-newsreader",
@@ -33,7 +35,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${newsreader.variable} ${manrope.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-paper text-ink">{children}</body>
+      <body className="min-h-full flex flex-col bg-paper text-ink">
+        <Suspense fallback={null}>
+          <NavProvider>{children}</NavProvider>
+        </Suspense>
+      </body>
     </html>
   );
 }

@@ -1,6 +1,7 @@
-import { chatJSON, decide, research, todayLabel, extractJSON, chat } from "./openrouter";
+import { chatJSON, decide, todayLabel, chat } from "./openrouter";
+import { findCandidatesDeep, describeUrl } from "./research";
 import { config, languageEnglishName } from "../config";
-import { readPage, sourceNameFor, hostOf, resolveRedirect } from "../web";
+import { readPage, sourceNameFor, hostOf } from "../web";
 import { uid } from "../api";
 import type { Candidate, Experience, Extraction, Insight, Profile, ProjectDoc, Question, ResumeDoc, Understanding, Bullet } from "../types";
 import { emptyProfile } from "../types";
@@ -11,9 +12,11 @@ import { emptyProfile } from "../types";
 
 const VOICE = `You are Mosaic, an assistant that turns a person's real career into a resume aimed at a specific role.
 Principles you never break:
-- Plain, specific, honest. No clichés ("passionate", "visionary", "results-driven", "dynamic", "synergy"), no selling, no adjectives the evidence does not earn.
+- Impact first. Every bullet opens with the outcome or the scale (what changed, for whom, by how much), then how. Strong, specific verbs: built, cut, grew, shipped, led, launched, turned around, won. Never "helped", "worked on", "responsible for", "involved in".
+- Plain, specific, honest. No clichés ("passionate", "visionary", "results-driven", "dynamic", "synergy"), no selling, no adjectives the evidence does not earn. Impact comes from facts and numbers, not from praise.
 - Never invent facts, numbers, employers, dates or titles. If something is missing, leave it out or mark it to be confirmed.
-- Prefer concrete outcomes with numbers the person actually gave. Keep each bullet to one sentence.
+- Prefer concrete outcomes with numbers the person actually gave. Keep each bullet to one sentence, ideally under 25 words. Cut filler words.
+- Recency matters: the most recent two years carry the most detail; older work compresses to its single most impressive fact.
 - Respect the person's language: write in the language you are told to write in, natively (not word-for-word translated).
 - Today's date is ${todayLabel()}.`;
 
@@ -135,143 +138,53 @@ ${text.slice(0, 30000)}
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stage 3a — who is this person online?                             */
+/*  Stage 3a — who is this person online? (deep research)             */
 /* ------------------------------------------------------------------ */
 
-interface RawHit {
-  title: string;
-  url: string;
-  snippet: string;
-}
-
 export async function findCandidates(project: ProjectDoc): Promise<{ candidates: Candidate[]; pagesChecked: number; intro: string }> {
-  const p = project.profile;
-  const u = project.understanding;
-  const who = [p.name, p.headline, p.experience[0] ? `${p.experience[0].title} at ${p.experience[0].company}` : "", p.location, p.education[0]?.school].filter(Boolean).join(", ");
-  const hits: RawHit[] = [];
-
-  const queries = [
-    `Find the LinkedIn profile(s) of "${p.name}"${p.experience[0] ? `, who worked at ${p.experience[0].company}` : ""}${p.location ? ` (${p.location})` : ""}. Include other people with the same name if they appear, so the person can disambiguate. Return every linkedin.com/in/ URL you find.`,
-    `Find public professional pages about "${p.name}" (${who}): conference talks, articles or blog posts, GitHub, Google Scholar, podcasts, press mentions, company team pages, speaker profiles. Exclude LinkedIn.`,
-  ];
-
-  const results = await Promise.allSettled(
-    queries.map((q) =>
-      research(
-        `${q}\n\nReturn ONLY a JSON array (no prose) of up to 10 items: [{"title": string, "url": string, "snippet": one or two sentences about what the page says and who it appears to be}]. Only include URLs that appeared in your search results.`,
-      ),
-    ),
-  );
-  for (const r of results) {
-    if (r.status !== "fulfilled") {
-      console.warn("[research] query failed:", (r.reason as Error)?.message);
-      continue;
-    }
-    try {
-      const arr = extractJSON<RawHit[]>(r.value.content);
-      if (Array.isArray(arr)) hits.push(...arr.filter((h) => h && typeof h.url === "string" && /^https?:\/\//.test(h.url)));
-      else console.warn("[research] non-array reply:", r.value.content.slice(0, 300));
-    } catch (e) {
-      console.warn("[research] unparsable reply:", (e as Error).message, "|", r.value.content.slice(0, 400));
-    }
-    console.log(`[research] model=${r.value.model} citations=${r.value.citations.length} cost=${r.value.cost} contentChars=${r.value.content.length}`);
-    for (const c of r.value.citations) if (c.url && !hits.some((h) => h.url === c.url)) hits.push({ title: c.title ?? hostOf(c.url), url: c.url, snippet: c.content?.slice(0, 300) ?? "" });
-  }
-  // resolve grounding redirects to real pages
-  await Promise.all(hits.map(async (h) => (h.url = await resolveRedirect(h.url))));
-  // de-dupe by URL
-  const seen = new Set<string>();
-  const unique = hits.filter((h) => {
-    const key = h.url.replace(/[?#].*$/, "").replace(/\/$/, "");
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  if (unique.length === 0 && config.web.engine === "native") {
-    // second chance with the Exa index, which covers smaller sites well
-    const alt = await Promise.allSettled(queries.map((q) => chat({ model: config.models.research, messages: [{ role: "system", content: "You are a careful research assistant. Use the web search results provided. Only report pages you actually found; never invent URLs. Output JSON only." }, { role: "user", content: `${q}\n\nReturn ONLY a JSON array of up to 10 items: [{"title","url","snippet"}].` }], web: { engine: "exa" }, maxTokens: 6000, reasoning: "low", temperature: 0.2 })));
-    for (const r of alt) {
-      if (r.status !== "fulfilled") continue;
-      try {
-        const arr = extractJSON<RawHit[]>(r.value.content);
-        if (Array.isArray(arr)) for (const h of arr) if (h?.url && /^https?:\/\//.test(h.url) && !unique.some((u) => u.url === h.url)) unique.push(h);
-      } catch {
-        /* ignore */
-      }
-      for (const c of r.value.citations) if (c.url && !unique.some((h) => h.url === c.url)) unique.push({ title: c.title ?? hostOf(c.url), url: c.url, snippet: c.content?.slice(0, 300) ?? "" });
-    }
-  }
-  if (unique.length === 0) return { candidates: [], pagesChecked: 0, intro: "I searched LinkedIn, conference sites, Medium, GitHub and Scholar but couldn't find pages that are clearly about you. Paste a link below if you have one." };
-
-  const ranked = await decide<{ candidates: Partial<Candidate>[]; intro: string }>(
-    `You judge whether web pages belong to a specific person, for a resume assistant. Be honest about uncertainty: when several people share a name, show the alternatives and explain how you told them apart. Never guess that a page is theirs.`,
-    `The person, from their resume: ${JSON.stringify({ name: p.name, headline: p.headline, location: p.location, roles: p.experience.slice(0, 4).map((e) => `${e.title} @ ${e.company} (${e.start ?? ""}–${e.end ?? ""})`), education: p.education.map((e) => `${e.degree} ${e.school}`), lastUpdated: u?.lastUpdatedLabel })}
-
-Pages found (${unique.length}): ${JSON.stringify(unique.slice(0, 30))}
-
-Return JSON:
-{"candidates": [{"url", "title": short display title (for LinkedIn use the person's name as written on that page), "subtitle": one line e.g. "Head of Product · Kestrel Payments · Bengaluru" or "By Asha R., 2024", "group": "linkedin" if linkedin.com/in or linkedin.com/pub else "web", "kind": "Profile"|"Talk"|"Article"|"Code"|"Paper"|"Press"|"Listing"|"Page", "source": "LinkedIn"|"Medium"|"GitHub"|"Sessionize"|"YouTube"|"Scholar"|site name, "strength": "strong"|"possible"|"unlikely", "why": one sentence starting with "Why:" explaining the match or mismatch against the resume (mention the specific overlap or clash: employer, dates, field, city)}],
- "intro": one sentence like "I searched LinkedIn, conference sites, Medium, GitHub and Scholar — N pages checked, M worth showing."}
-Keep at most 3 LinkedIn candidates (strongest first) and at most 6 web pages. Drop pages that are clearly a different person AND uninformative, but keep same-name different-field people as "unlikely" so the person can rule them out.`,
-    3500,
-  );
-
-  const candidates: Candidate[] = (ranked.candidates ?? [])
-    .filter((c) => c.url)
-    .map((c) => {
-      const auto = sourceNameFor(c.url!);
-      const isLi = /linkedin\.com\/(in|pub)\//.test(c.url!);
-      return {
-        id: uid("c"),
-        group: isLi ? "linkedin" : "web",
-        kind: c.kind ?? auto.kind,
-        source: c.source ?? auto.source,
-        title: c.title ?? hostOf(c.url!),
-        subtitle: c.subtitle,
-        url: c.url!,
-        strength: (["strong", "possible", "unlikely"] as const).includes(c.strength as "strong") ? (c.strength as Candidate["strength"]) : "possible",
-        why: c.why ?? "",
-        selected: c.strength === "strong",
-      };
-    });
-  // strongest first within groups
-  const order = { strong: 0, possible: 1, unlikely: 2 };
-  candidates.sort((a, b) => order[a.strength] - order[b.strength]);
-  return { candidates, pagesChecked: unique.length, intro: ranked.intro ?? `${unique.length} pages checked, ${candidates.length} worth showing.` };
+  return findCandidatesDeep(project);
 }
 
 export async function candidateFromUrl(project: ProjectDoc, url: string): Promise<Candidate> {
   const auto = sourceNameFor(url);
   let title = hostOf(url);
   let subtitle: string | undefined;
+  let date: string | undefined;
   try {
     const page = await readPage(url);
-    const { data } = await chatJSON<{ title: string; subtitle: string; kind: string }>({
-      model: config.models.fast,
-      messages: [
-        { role: "system", content: "You label web pages. JSON only." },
-        { role: "user", content: `Page URL: ${url}\nContent (truncated):\n${page.text.slice(0, 4000)}\n\nReturn {"title": a short display title (≤10 words), "subtitle": one line describing what/who it is, "kind": "Profile"|"Talk"|"Article"|"Code"|"Paper"|"Press"|"Listing"|"Page"}` },
-      ],
-      maxTokens: 300,
-    });
-    title = data.title || title;
-    subtitle = data.subtitle;
-    auto.kind = data.kind || auto.kind;
+    const d = await describeUrl(url, page.text);
+    title = d.title || title;
+    subtitle = d.subtitle;
+    date = d.date;
+    auto.kind = d.kind || auto.kind;
   } catch {
     /* keep host as title */
   }
   void project;
-  return { id: uid("c"), group: /linkedin\.com\/(in|pub)\//.test(url) ? "linkedin" : "web", kind: auto.kind, source: auto.source, title, subtitle, url, strength: "possible", why: "Why: you added this link yourself — I'll read it and keep only what fits.", addedByUser: true, selected: true };
+  return { id: uid("c"), group: /linkedin\.com\/(in|pub)\//.test(url) ? "linkedin" : "web", kind: auto.kind, source: auto.source, title, subtitle, url, date, strength: "possible", why: "Why: you added this link yourself — I'll read it and keep only what fits.", addedByUser: true, selected: true };
 }
 
 /* ------------------------------------------------------------------ */
 /*  Stage 3b — read a confirmed source; take or leave with reasons    */
 /* ------------------------------------------------------------------ */
 
-export async function readSource(project: ProjectDoc, candidate: Candidate): Promise<{ extraction: Extraction; profile: Profile }> {
+export async function readSource(project: ProjectDoc, candidate: Candidate, onProgress?: (line: string) => void): Promise<{ extraction: Extraction; profile: Profile }> {
   const t0 = Date.now();
-  const page = await readPage(candidate.url, `${candidate.title} — ${candidate.subtitle ?? ""}`);
+  const page = await readPage(candidate.url, `${candidate.title} — ${candidate.subtitle ?? ""}`, project.profile.name);
+  // Follow pages the main page points at (a speaker profile → its sessions, a book page → its author bio), one level deep.
+  const followed: { url: string; title: string; text: string }[] = [];
+  if (page.links?.length) {
+    const picks = await pickFollowUps(project, candidate, page.links);
+    for (const link of picks.slice(0, 4)) {
+      onProgress?.(`also opening ${link.title || hostOf(link.url)}…`);
+      try {
+        const sub = await readPage(link.url, link.title, project.profile.name);
+        if (sub.text.length > 200) followed.push({ url: link.url, title: sub.title || link.title, text: sub.text.slice(0, 6000) });
+      } catch {
+        /* skip */
+      }
+    }
+  }
   const p = project.profile;
   const u = project.understanding;
   const target = u?.seniority ? `a ${u.seniority}'s resume` : "this person's resume";
@@ -298,11 +211,14 @@ ${profileForPrompt(p)}
 
 Resume last updated: ${u?.lastUpdatedLabel ?? "unknown"}. Today: ${todayLabel()}.
 
-Page: ${candidate.title} (${candidate.source}, ${candidate.kind}) — ${candidate.url}
+Page: ${candidate.title} (${candidate.source}, ${candidate.kind}${candidate.date ? `, ${candidate.date}` : ""}) — ${candidate.url}
 Content:
 """
 ${page.text.slice(0, 14000)}
 """
+${followed.length ? `Linked pages I also opened:\n${followed.map((f) => `--- ${f.title} (${f.url})\n${f.text}`).join("\n")}` : ""}
+
+Be exhaustive: if the page lists several talks, articles, roles, posts or projects, enumerate EVERY one with its date (year at least) — do not summarise them as "several talks". Recent items (last two years) matter most and must each be captured. Posts and activity on a LinkedIn profile reveal current focus: distil them into 1–3 facts about what the person works on now.
 
 Return JSON:
 {"took": [short phrases describing each piece you are taking and where it goes, e.g. "Head of Product, Jan 2024 – present — a role missing from your 2023 resume"],
@@ -356,6 +272,7 @@ If the page is unavailable or clearly not about this person, take nothing and ex
     took: result.took ?? [],
     leftOut: result.leftOut ?? [],
     willAsk: result.willAsk ?? [],
+    followed: followed.map((f) => ({ url: f.url, title: f.title })),
     note: result.note || ((result.took ?? []).length === 0 ? (page.via === "search" && /PAGE UNAVAILABLE/i.test(page.text) ? "I couldn't open this page, so nothing was taken from it." : `Nothing on this page added to what I already know about you — real, but it would only take space in ${target}.`) : undefined),
   };
   return { extraction, profile };
@@ -367,6 +284,25 @@ function sortExperience(p: Profile) {
     return parseInt(e.end.replace(/\D/g, "").slice(0, 6).padEnd(6, "0"), 10) || 0;
   };
   p.experience.sort((a, b) => key(b) - key(a));
+}
+
+async function pickFollowUps(project: ProjectDoc, candidate: Candidate, links: { url: string; title: string }[]): Promise<{ url: string; title: string }[]> {
+  const sameHost = hostOf(candidate.url);
+  const shortlist = links
+    .filter((l) => /^https?:\/\//.test(l.url) && !/\.(png|jpg|jpeg|gif|svg|pdf|zip|css|js)(\?|$)/i.test(l.url))
+    .filter((l) => !/\/(login|signup|signin|privacy|terms|cookie|about|contact|pricing|cart|search)\b/i.test(l.url))
+    .slice(0, 80);
+  if (shortlist.length === 0) return [];
+  try {
+    const d = await decide<{ urls: string[] }>(
+      `You pick which linked pages are worth opening to learn more about ONE person's professional work (their talks, sessions, articles, books, projects). Prefer pages on the same site that are clearly about this person's own items; skip navigation, other speakers, generic listings and social share links.`,
+      `Person: ${project.profile.name}. Current page: ${candidate.title} (${candidate.url}) on ${sameHost}.\nLinks: ${JSON.stringify(shortlist)}\n\nReturn JSON {"urls": up to 4 URLs worth opening, most valuable first; [] if none}`,
+      600,
+    );
+    return (d.urls ?? []).map((u) => shortlist.find((l) => l.url === u)).filter((x): x is { url: string; title: string } => Boolean(x));
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -611,6 +547,41 @@ function coerceResume(d: Partial<ResumeDoc>, project: ProjectDoc, language: stri
     confirmations: withIds(d.confirmations, "cf"),
     checks: { twoPages: true, plainLanguage: true },
   };
+}
+
+/** Editorial pass: every line rewritten for force and clarity, facts untouched. */
+export async function sharpenResume(project: ProjectDoc, doc: ResumeDoc): Promise<ResumeDoc> {
+  const lang = languageEnglishName(doc.language);
+  const { data } = await chatJSON<{ headline?: string; summary?: string; experience?: { id: string; bullets: { id: string; text: string; confirm?: boolean }[] }[] }>({
+    model: config.models.writer,
+    messages: [
+      { role: "system", content: VOICE },
+      {
+        role: "user",
+        content: `You are the final editor of this resume, aimed at: ${project.targetRole ?? "the next role"}. Language: ${lang}. Make every line land harder WITHOUT adding or changing a single fact, number, name or date.
+
+Rules for each bullet: outcome or scale first, then the how; one strong verb; cut filler ("responsible for", "worked on", "various", "successfully"); under 25 words; keep "confirm" flags exactly as they are. The headline: ≤8 words that position the person for the target role using their strongest real credential. The summary: 3–4 tight sentences, the first one carrying the single most impressive fact.
+
+Resume JSON:
+${JSON.stringify({ headline: doc.headline, summary: doc.summary, experience: doc.experience.map((e) => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets })) })}
+
+Return JSON: {"headline": string, "summary": string, "experience": [{"id": same id, "bullets": [{"id": same id, "text": rewritten, "confirm": same}]}]} — same number of bullets per role, same ids, same order.`,
+      },
+    ],
+    maxTokens: 5000,
+    temperature: 0.35,
+  });
+  const next: ResumeDoc = { ...doc };
+  if (data.headline) next.headline = data.headline;
+  if (data.summary) next.summary = data.summary;
+  if (Array.isArray(data.experience)) {
+    next.experience = doc.experience.map((e) => {
+      const upd = data.experience!.find((x) => x.id === e.id);
+      if (!upd || !Array.isArray(upd.bullets) || upd.bullets.length !== e.bullets.length) return e;
+      return { ...e, bullets: e.bullets.map((b, i) => ({ ...b, text: upd.bullets[i]?.text || b.text })) };
+    });
+  }
+  return next;
 }
 
 /** Rewrites one section in response to a comment. Returns the new doc + a one-line explanation. */

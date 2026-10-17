@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { StageShell } from "@/components/stage/StageShell";
 import { PaperPreview } from "@/components/preview/PaperPreview";
 import { FunFacts } from "@/components/FunFacts";
@@ -11,7 +11,7 @@ import { languageLabel } from "@/lib/config";
 import type { ProjectJSON } from "@/lib/types";
 
 export function UploadStage({ initial }: { initial: ProjectJSON }) {
-  const router = useRouter();
+  const { go, pending: navPending } = useNavigate();
   const { project, setProject } = useProject(initial.id, initial);
   const [busy, setBusy] = useState<"idle" | "reading" | "fixing" | "skipping">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function UploadStage({ initial }: { initial: ProjectJSON }) {
     try {
       await api(`/api/projects/${p.id}/research`, { method: "POST", json: { name: skipName.trim(), headline: skipHeadline.trim(), location: skipLocation.trim(), force: true } });
       await api(`/api/projects/${p.id}`, { method: "PATCH", json: { stage: 3, skippedUpload: true } });
-      router.push(`/m/${p.id}/identity`);
+      go(`/m/${p.id}/identity`);
     } catch (e) {
       setError((e as Error).message);
       setBusy("idle");
@@ -85,8 +85,8 @@ export function UploadStage({ initial }: { initial: ProjectJSON }) {
       footer={
         u ? (
           <>
-            <button type="button" className="btn-primary" onClick={() => router.push(continueHref)}>
-              Looks right, continue <ArrowRight size={16} />
+            <button type="button" className="btn-primary" disabled={navPending} onClick={() => go(continueHref)}>
+              {navPending ? <Spinner light /> : null} Looks right, continue <ArrowRight size={16} />
             </button>
             <button type="button" className="btn-secondary" onClick={() => setFixOpen((v) => !v)}>
               Something is off

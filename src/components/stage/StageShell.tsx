@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "@/components/nav/NavProgress";
 import { useEffect, useState, type ReactNode } from "react";
 import { Wordmark, TileTrio } from "@/components/Mark";
 import { ArrowLeft, Check, ChevronUp, X } from "@/components/Icons";
@@ -80,7 +80,7 @@ export interface StageShellProps {
 
 export function StageShell(p: StageShellProps) {
   const mobile = useIsMobile();
-  const router = useRouter();
+  const { go } = useNavigate();
   const [peek, setPeek] = useState(false);
   const stageDef = STAGES.find((s) => s.n === p.stage) ?? STAGES[1];
   const prev = STAGES.find((s) => s.n === p.stage - 1);
@@ -167,9 +167,7 @@ export function StageShell(p: StageShellProps) {
             type="button"
             className="btn-ghost text-[13px]"
             style={{ padding: "8px 12px" }}
-            onClick={() => {
-              router.push("/projects");
-            }}
+            onClick={() => go("/projects")}
           >
             Save &amp; exit
           </button>
