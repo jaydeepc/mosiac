@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@/components/nav/NavProgress";
 import { StageShell } from "@/components/stage/StageShell";
 import { PaperPreview } from "@/components/preview/PaperPreview";
@@ -29,7 +29,35 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
   const running = !research || research.status === "running" || research.status === "idle";
   const [linkedin, setLinkedin] = useState<string>(p.linkedinChoice ?? "");
   const [selected, setSelected] = useState<Set<string>>(() => new Set((p.research?.candidates ?? []).filter((c) => c.group === "web" && c.selected).map((c) => c.id)));
-  const [addOpen, setAddOpen] = useState<null | "linkedin" | "web">(null);
+  const [addOpen, setAddOpen] = useState<null | "linkedin" | "web" | "export">(null);
+  const [exportText, setExportText] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportDone, setExportDone] = useState<string | null>(p.research?.candidates.find((c) => c.url === "about:linkedin-export")?.title ?? null);
+  const exportFileRef = useRef<HTMLInputElement>(null);
+
+  async function sendExport(file?: File) {
+    setExportBusy(true);
+    setError(null);
+    try {
+      let res: { project: ProjectJSON; candidate: Candidate };
+      if (file) {
+        const fd = new FormData();
+        fd.append("file", file);
+        res = await api(`/api/projects/${p.id}/linkedin`, { method: "POST", body: fd });
+      } else {
+        res = await api(`/api/projects/${p.id}/linkedin`, { method: "POST", json: { text: exportText } });
+      }
+      setProject(res.project);
+      setLinkedin(res.candidate.id);
+      setExportDone(res.candidate.title);
+      setExportText("");
+      setAddOpen(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExportBusy(false);
+    }
+  }
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -207,9 +235,11 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
                       <span className="text-xs leading-[1.5]" style={{ color: c.strength === "strong" ? "#1E2430" : "#5B6472" }}>
                         {c.why}
                       </span>
-                      <a href={c.url} target="_blank" rel="noreferrer" className="text-xs font-semibold" onClick={(e) => e.stopPropagation()}>
-                        Open page ↗
-                      </a>
+                      {c.url.startsWith("http") && (
+                        <a href={c.url} target="_blank" rel="noreferrer" className="text-xs font-semibold" onClick={(e) => e.stopPropagation()}>
+                          Open page ↗
+                        </a>
+                      )}
                     </label>
                   );
                 })}
@@ -223,6 +253,35 @@ export function IdentityStage({ initial }: { initial: ProjectJSON }) {
               </button>
             </label>
             {addOpen === "linkedin" && <AddLink value={link} onChange={setLink} onAdd={addLink} busy={busy} placeholder="https://www.linkedin.com/in/your-name" />}
+            <div className="flex flex-col gap-2 rounded-xl" style={{ padding: "12px 14px", background: "#F7F5EF" }}>
+              <div className="flex items-center gap-2 flex-wrap text-[13px]">
+                <strong>Want every role and date exactly as LinkedIn shows them?</strong>
+                <span className="text-muted">On LinkedIn: your profile → <em>More</em> → <em>Save to PDF</em>, then</span>
+                <input ref={exportFileRef} type="file" accept=".pdf,.txt" className="sr-only" onChange={(e) => e.target.files?.[0] && sendExport(e.target.files[0])} />
+                <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: 12 }} disabled={exportBusy} onClick={() => exportFileRef.current?.click()}>
+                  {exportBusy ? <Spinner size={12} /> : null} Upload that PDF
+                </button>
+                <span className="text-muted">or</span>
+                <button type="button" className="link-btn text-[13px]" onClick={() => setAddOpen(addOpen === "export" ? null : "export")}>
+                  paste your profile text
+                </button>
+              </div>
+              {exportDone && (
+                <span className="text-xs font-semibold" style={{ color: "#2F6F73" }}>
+                  ✓ {exportDone} is in — it will be read in the next step.
+                </span>
+              )}
+              {addOpen === "export" && (
+                <div className="flex flex-col gap-2 anim-fade-up">
+                  <textarea className="textarea" rows={6} value={exportText} onChange={(e) => setExportText(e.target.value)} placeholder="Select everything on your LinkedIn profile page, copy, and paste here — headline, About, Experience with dates, Education…" />
+                  <div>
+                    <button type="button" className="btn-primary" style={{ padding: "9px 16px", fontSize: 13 }} disabled={exportBusy || exportText.trim().length < 80} onClick={() => sendExport()}>
+                      {exportBusy ? <Spinner light size={13} /> : null} Use this text
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </fieldset>
 
           <fieldset className="m-0 card flex flex-col gap-2.5" style={{ padding: "18px 20px" }}>

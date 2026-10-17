@@ -231,6 +231,7 @@ export interface ProjectDoc {
     error?: string;
   };
   linkedinChoice?: string | "none";
+  linkedinExport?: { text: string; fileName?: string; addedAt: Date };
   extractions: Extraction[];
   readingStatus?: "idle" | "running" | "done";
 

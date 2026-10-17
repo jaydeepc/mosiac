@@ -67,6 +67,7 @@ vercel --prod
 ## How the AI is wired
 
 - **Research** (`src/lib/ai/stages.ts → findCandidates`): two grounded searches (LinkedIn; everything else), redirect resolution, then the decision model ranks each page `strong / possible / unlikely` with a one‑line reason. Same‑name people are kept as "unlikely" so the person can rule them out.
+- **LinkedIn** (`src/lib/ai/linkedin.ts`): LinkedIn blocks direct fetches, so the public profile text is pulled from the Exa index through OpenRouter's web plugin (`engine: exa`, `include_domains: linkedin.com`) in three targeted pulls — experience with exact dates, About/education/skills, recent posts — and structured into JSON. Dated roles are merged deterministically (LinkedIn titles and dates are authoritative; same-company, same-title entries consolidate; concurrent roles stay separate). Fallback: upload LinkedIn's own *Save to PDF* export or paste the profile text on the "Is this you?" screen.
 - **Reading** (`readSource`): page text (direct fetch, or grounded summary when a site blocks bots), then a strict take‑or‑leave judgement. Numbers found in talks/articles are flagged *Will ask you first*, never taken as fact.
 - **Voice** (`src/lib/recorder.ts`): raw PCM → 16 kHz WAV chunks every ~12 s (or on a pause) → `/api/transcribe`; browser speech recognition adds instant captions when available. Transcripts stay in the spoken script with an English translation.
 - **Writing voice**: plain, specific, no clichés, nothing invented; estimates are marked `confirm?` on the page.

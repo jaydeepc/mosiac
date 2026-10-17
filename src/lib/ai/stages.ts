@@ -1,5 +1,6 @@
 import { chatJSON, decide, todayLabel, chat } from "./openrouter";
 import { findCandidatesDeep, describeUrl } from "./research";
+import { extractLinkedInProfile, structureLinkedInExport, linkedInToText, mergeLinkedIn, consolidateExperience, type LinkedInData } from "./linkedin";
 import { config, languageEnglishName } from "../config";
 import { readPage, sourceNameFor, hostOf } from "../web";
 import { uid } from "../api";
@@ -170,7 +171,20 @@ export async function candidateFromUrl(project: ProjectDoc, url: string): Promis
 
 export async function readSource(project: ProjectDoc, candidate: Candidate, onProgress?: (line: string) => void): Promise<{ extraction: Extraction; profile: Profile }> {
   const t0 = Date.now();
-  const page = await readPage(candidate.url, `${candidate.title} — ${candidate.subtitle ?? ""}`, project.profile.name);
+  const isLinkedIn = /linkedin\.com\/(in|pub)\//.test(candidate.url) || candidate.url === "about:linkedin-export";
+  let liData: LinkedInData | null = null;
+  let liMerge: { added: string[]; updated: string[] } | null = null;
+  let page: import("../web").PageRead;
+  if (isLinkedIn) {
+    onProgress?.(candidate.url === "about:linkedin-export" ? "reading your LinkedIn export…" : "pulling the public profile text — experience, about, recent posts…");
+    liData = candidate.url === "about:linkedin-export" ? await structureLinkedInExport(project.linkedinExport?.text ?? "") : await extractLinkedInProfile(candidate.url, project.profile.name);
+    const merged = mergeLinkedIn(project.profile, liData);
+    liMerge = { added: merged.added, updated: merged.updated };
+    project = { ...project, profile: merged.profile };
+    page = { url: candidate.url, title: candidate.title, text: linkedInToText(liData), via: "search" };
+  } else {
+    page = await readPage(candidate.url, `${candidate.title} — ${candidate.subtitle ?? ""}`, project.profile.name);
+  }
   // Follow pages the main page points at (a speaker profile → its sessions, a book page → its author bio), one level deep.
   const followed: { url: string; title: string; text: string }[] = [];
   if (page.links?.length) {
@@ -218,6 +232,7 @@ ${page.text.slice(0, 14000)}
 """
 ${followed.length ? `Linked pages I also opened:\n${followed.map((f) => `--- ${f.title} (${f.url})\n${f.text}`).join("\n")}` : ""}
 
+${isLinkedIn ? `This is the person's own LinkedIn profile, already read and structured above; its positions and dates have been merged into the profile (return newExperience: [] — never add positions from it). Focus on: bullets from role descriptions, About-section facts, recent-post themes that show current work, certifications, honours, publications. ${liData?.sourceNote ?? ""}` : ""}
 Be exhaustive: if the page lists several talks, articles, roles, posts or projects, enumerate EVERY one with its date (year at least) — do not summarise them as "several talks". Recent items (last two years) matter most and must each be captured. Posts and activity on a LinkedIn profile reveal current focus: distil them into 1–3 facts about what the person works on now.
 
 Return JSON:
@@ -237,7 +252,7 @@ If the page is unavailable or clearly not about this person, take nothing and ex
 
   const profile = structuredClone(p);
   const src = candidate.source;
-  for (const ne of result.newExperience ?? []) {
+  for (const ne of isLinkedIn ? [] : (result.newExperience ?? [])) {
     if (!ne.title || !ne.company) continue;
     const dup = profile.experience.find((e) => e.company.toLowerCase() === ne.company!.toLowerCase() && e.title.toLowerCase() === ne.title!.toLowerCase());
     if (dup) continue;
@@ -246,9 +261,11 @@ If the page is unavailable or clearly not about this person, take nothing and ex
   for (const up of result.updatedExperience ?? []) {
     const e = profile.experience.find((x) => x.id === up.id);
     if (!e) continue;
-    if (up.end) e.end = up.end;
-    if (up.title) e.title = up.title;
-    for (const b of up.bullets ?? []) e.bullets.push({ id: uid("b"), text: b.text, confirm: b.confirm, source: src });
+    // LinkedIn titles and dates are taken as written; the judge only adds bullets there.
+    const authoritative = e.source?.includes("LinkedIn");
+    if (up.end && !authoritative) e.end = up.end;
+    if (up.title && !authoritative) e.title = up.title;
+    for (const b of up.bullets ?? []) if (b.text && !e.bullets.some((x) => x.text === b.text)) e.bullets.push({ id: uid("b"), text: b.text, confirm: b.confirm, source: src });
     if (!e.source?.includes(src)) e.source = [...(e.source ?? []), src];
   }
   const push = (list: { id: string; text: string; year?: string; source?: string; confirm?: boolean }[], items?: { text: string; year?: string; confirm?: boolean }[]) => {
@@ -262,28 +279,29 @@ If the page is unavailable or clearly not about this person, take nothing and ex
   if (result.headline) profile.headline = result.headline;
   if (result.location && !profile.location) profile.location = result.location;
   if (result.linkedin && !profile.linkedin) profile.linkedin = result.linkedin;
+  if (isLinkedIn && !profile.linkedin && candidate.url.startsWith("http")) profile.linkedin = candidate.url;
+  const consolidated = consolidateExperience(profile);
+  profile.experience = consolidated.experience;
   sortExperience(profile);
 
+  const liTook = liMerge ? [...liMerge.added.map((a) => `Role from LinkedIn: ${a}`), ...liMerge.updated.map((u) => `Dates fixed from LinkedIn: ${u}`)] : [];
   const extraction: Extraction = {
     candidateId: candidate.id,
     title: `${candidate.source} · ${candidate.title}`,
     status: "done",
     readMs: Date.now() - t0,
-    took: result.took ?? [],
+    took: [...liTook, ...(result.took ?? []).filter((t) => !liTook.some((l) => l.toLowerCase().includes(t.toLowerCase().slice(0, 30))))],
     leftOut: result.leftOut ?? [],
     willAsk: result.willAsk ?? [],
     followed: followed.map((f) => ({ url: f.url, title: f.title })),
-    note: result.note || ((result.took ?? []).length === 0 ? (page.via === "search" && /PAGE UNAVAILABLE/i.test(page.text) ? "I couldn't open this page, so nothing was taken from it." : `Nothing on this page added to what I already know about you — real, but it would only take space in ${target}.`) : undefined),
+    note: (liData && liData.coverage === "none" ? liData.sourceNote : undefined) || result.note || ((result.took ?? []).length === 0 ? (page.via === "search" && /PAGE UNAVAILABLE/i.test(page.text) ? "I couldn't open this page, so nothing was taken from it." : `Nothing on this page added to what I already know about you — real, but it would only take space in ${target}.`) : undefined),
   };
   return { extraction, profile };
 }
 
 function sortExperience(p: Profile) {
-  const key = (e: Experience) => {
-    if (!e.end || /present/i.test(e.end)) return 99999;
-    return parseInt(e.end.replace(/\D/g, "").slice(0, 6).padEnd(6, "0"), 10) || 0;
-  };
-  p.experience.sort((a, b) => key(b) - key(a));
+  const key = (e: Experience) => (!e.end || /present/i.test(e.end) ? "9999-99" : e.end.padEnd(7, "-12"));
+  p.experience.sort((a, b) => key(b).localeCompare(key(a)) || (b.start ?? "").localeCompare(a.start ?? ""));
 }
 
 async function pickFollowUps(project: ProjectDoc, candidate: Candidate, links: { url: string; title: string }[]): Promise<{ url: string; title: string }[]> {
