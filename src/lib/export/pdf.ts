@@ -1,17 +1,35 @@
 import { createPrintToken } from "@/lib/print-token";
+import type { Browser } from "puppeteer-core";
 
 /**
  * Renders the resume to a two-page A4 PDF with headless Chrome by opening the app's own
  * /print/[id] page (same React component as the screen). If the content spills past two
  * pages, the type is scaled down a little and rendered again.
+ *
+ * Locally this uses the Chrome that `puppeteer` downloads; on Vercel/AWS it uses the
+ * serverless Chromium build from @sparticuz/chromium.
  */
-export async function resumeToPdf(origin: string, projectId: string, which: "main" | "second"): Promise<Buffer> {
+async function launchBrowser(): Promise<Browser> {
+  const serverless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (serverless) {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    const puppeteer = (await import("puppeteer-core")).default;
+    return puppeteer.launch({
+      args: [...chromium.args, "--font-render-hinting=none"],
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    }) as unknown as Promise<Browser>;
+  }
   const puppeteer = (await import("puppeteer")).default;
-  const browser = await puppeteer.launch({
+  return puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--font-render-hinting=none"],
-  });
+  }) as unknown as Promise<Browser>;
+}
+
+export async function resumeToPdf(origin: string, projectId: string, which: "main" | "second"): Promise<Buffer> {
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 2 });

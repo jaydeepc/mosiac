@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: false,
   partialPrefetching: false,
-  serverExternalPackages: ["puppeteer", "mongodb", "unpdf", "mammoth", "docx"],
+  serverExternalPackages: ["puppeteer", "puppeteer-core", "@sparticuz/chromium", "mongodb", "unpdf", "mammoth", "docx"],
   experimental: {
     serverActions: { bodySizeLimit: "20mb" },
   },

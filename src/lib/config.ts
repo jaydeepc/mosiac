@@ -13,7 +13,7 @@ function env(name: string, fallback?: string): string {
 
 export const config = {
   appName: env("APP_NAME", "Mosaic"),
-  appUrl: env("APP_URL", "http://localhost:3000"),
+  appUrl: env("APP_URL", process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3000"),
   mongoUri: () => env("MONGODB_URI"),
   mongoDb: env("MONGODB_DB", "mosaic"),
   authSecret: env("AUTH_SECRET", "mosaic-dev-secret"),
