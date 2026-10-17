@@ -1,9 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  cacheComponents: false,
+  partialPrefetching: false,
+  serverExternalPackages: ["puppeteer", "mongodb", "unpdf", "mammoth", "docx"],
+  experimental: {
+    serverActions: { bodySizeLimit: "20mb" },
+  },
   turbopack: {
     rules: {
       "*.css": {
