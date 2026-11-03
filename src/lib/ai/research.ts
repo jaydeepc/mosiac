@@ -51,7 +51,7 @@ export async function findCandidatesDeep(project: ProjectDoc): Promise<{ candida
   const who = [name, p.headline, current, p.location, p.education[0]?.school].filter(Boolean).join(", ");
   const year = new Date().getFullYear();
 
-  const native = (q: string) => research(`${q}\n\n${JSON_TAIL}`, undefined, 6000);
+  const native = (q: string) => research(`${q}\n\n${JSON_TAIL}`, undefined, 6000); // uses WEB_SEARCH_ENGINE (exa by default)
   const exa = (q: string, domains?: string[]) => research(`${q}\n\n${JSON_TAIL}`, "You are a careful research assistant. Use the web search results provided. Only report pages you actually found; never invent URLs. JSON only.", 6000, { engine: "exa", includeDomains: domains, maxResults: 10 });
 
   const queries: Promise<Awaited<ReturnType<typeof research>>>[] = [

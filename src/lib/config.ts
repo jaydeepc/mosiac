@@ -28,15 +28,15 @@ export const config = {
     baseUrl: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
   },
   models: {
-    writer: env("MODEL_WRITER", "google/gemini-3.8-flash"),
-    fast: env("MODEL_FAST", "google/gemini-3.5-flash-lite"),
+    writer: env("MODEL_WRITER", "z-ai/glm-5.3-flash"),
+    fast: env("MODEL_FAST", "z-ai/glm-5.3-flash"),
     decision: env("MODEL_DECISION", "typesafe/jev-router"),
-    research: env("MODEL_RESEARCH", "google/gemini-3.8-flash"),
-    transcribe: env("MODEL_TRANSCRIBE", "google/gemini-3.5-flash-lite"),
+    research: env("MODEL_RESEARCH", "z-ai/glm-5.3-flash"),
+    transcribe: env("MODEL_TRANSCRIBE", "qwen/qwen3.8-omni-flash"),
     image: env("MODEL_IMAGE", "openai/gpt-image-2.5-sunburst"),
   },
   web: {
-    engine: env("WEB_SEARCH_ENGINE", "native"),
+    engine: env("WEB_SEARCH_ENGINE", "exa"),
     maxResults: Number(env("WEB_SEARCH_MAX_RESULTS", "8")),
   },
   image: {

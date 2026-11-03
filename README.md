@@ -2,7 +2,7 @@
 
 An AI‑native, voice‑first application that turns a person's real career into a two‑page story aimed at a specific role. Upload an old resume (any language), confirm what is really you online, talk about the years in between, aim at a role, pick a look, refine by commenting on sections, and download as PDF or DOCX.
 
-Built with Next.js 16 (App Router), MongoDB, and OpenRouter models. Every model is a one‑line change in `.env.local`.
+Built with Next.js 16 (App Router), MongoDB, and OpenRouter models. Every model is a one‑line change in `.env.local`. No Google models are used: text work runs on Z.ai GLM 5.3 Flash, speech on Qwen 3.8 Omni Flash, judgement calls on the Jev router, and art on GPT Image 2.5 Sunburst.
 
 ## The eight stages
 
@@ -56,17 +56,17 @@ vercel --prod
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Seeded admin account |
 | `ALLOW_SELF_SIGNUP` | `true` lets anyone create an account from the sign‑in page (default `false`; admins add people) |
 | `OPENROUTER_API_KEY` | OpenRouter key |
-| `MODEL_WRITER` | Writes understanding, questions, resume, comments (`google/gemini-3.8-flash`) |
-| `MODEL_FAST` | Cheap model for light tasks and live draft lines (`google/gemini-3.5-flash-lite`) |
+| `MODEL_WRITER` | Writes understanding, questions, resume, comments (`z-ai/glm-5.3-flash`) |
+| `MODEL_FAST` | Fast model for light tasks and live draft lines (`z-ai/glm-5.3-flash`) |
 | `MODEL_DECISION` | Decisioning / judgement calls: is‑this‑you ranking, take‑or‑leave, role inference (`typesafe/jev-router`) |
-| `MODEL_RESEARCH` + `WEB_SEARCH_ENGINE` | Web‑grounded research via OpenRouter's `web` plugin. `native` = Google Search grounding for Gemini; `exa` is the cheaper fallback |
-| `MODEL_TRANSCRIBE` | Audio transcription + translation (`google/gemini-3.5-flash-lite`) |
+| `MODEL_RESEARCH` + `WEB_SEARCH_ENGINE` | Web research via OpenRouter's `web` plugin (`z-ai/glm-5.3-flash` + `exa`). The Exa index is also what holds LinkedIn profile text. `native` only works with Google/OpenAI/Anthropic/Perplexity/xAI models; the code falls back to `exa` otherwise |
+| `MODEL_TRANSCRIBE` | Audio transcription + translation; must accept `input_audio` (`qwen/qwen3.8-omni-flash`; alternatives `openai/gpt-audio-mini`, `mistralai/voxtral-small-24b-2507`) |
 | `MODEL_IMAGE`, `IMAGE_QUALITY` | Painted hero art and chart backdrops (`openai/gpt-image-2.5-sunburst`) |
 | `QUESTION_BUDGET` | Default number of interview questions |
 
 ## How the AI is wired
 
-- **Research** (`src/lib/ai/stages.ts → findCandidates`): two grounded searches (LinkedIn; everything else), redirect resolution, then the decision model ranks each page `strong / possible / unlikely` with a one‑line reason. Same‑name people are kept as "unlikely" so the person can rule them out.
+- **Research** (`src/lib/ai/research.ts`): nine parallel Exa-backed searches (LinkedIn hunt, talks, podcasts, writing, code/papers, press, latest activity), de-duplicated and dated, then the decision model ranks each page `strong / possible / unlikely` with a one‑line reason. Same‑name people are kept as "unlikely" so the person can rule them out.
 - **LinkedIn** (`src/lib/ai/linkedin.ts`): LinkedIn blocks direct fetches, so the public profile text is pulled from the Exa index through OpenRouter's web plugin (`engine: exa`, `include_domains: linkedin.com`) in three targeted pulls — experience with exact dates, About/education/skills, recent posts — and structured into JSON. Dated roles are merged deterministically (LinkedIn titles and dates are authoritative; same-company, same-title entries consolidate; concurrent roles stay separate). Fallback: upload LinkedIn's own *Save to PDF* export or paste the profile text on the "Is this you?" screen.
 - **Reading** (`readSource`): page text (direct fetch, or grounded summary when a site blocks bots), then a strict take‑or‑leave judgement. Numbers found in talks/articles are flagged *Will ask you first*, never taken as fact.
 - **Voice** (`src/lib/recorder.ts`): raw PCM → 16 kHz WAV chunks every ~12 s (or on a pause) → `/api/transcribe`; browser speech recognition adds instant captions when available. Transcripts stay in the spoken script with an English translation.

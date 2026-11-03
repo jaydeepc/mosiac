@@ -466,11 +466,25 @@ Return JSON: {"roleSuggestions": 3 short role targets ordered by fit, each ≤6 
 "shapeReason": one sentence, e.g. "I chose Leader from your last resume and the role."}`,
     800,
   );
+  let out = data;
+  if (!Array.isArray(out?.roleSuggestions) || out.roleSuggestions.length === 0) {
+    // the router occasionally returns an empty list; the writer model is a reliable second opinion
+    const { data: again } = await chatJSON<typeof data>({
+      model: config.models.writer,
+      messages: [
+        { role: "system", content: `${VOICE}\nYou infer, from evidence, which roles a person's career points to next. JSON only.` },
+        { role: "user", content: `Profile:\n${profileForPrompt(p)}\nSeniority: ${u?.seniority ?? "unknown"}.\n\nReturn JSON {"roleSuggestions": [3 short role targets with domain, best fit first], "defaultRole": fuller version of the first with geography if known, "shape": "leader"|"builder"|"specialist", "shapeReason": one sentence}` },
+      ],
+      maxTokens: 600,
+      temperature: 0.2,
+    });
+    out = again;
+  }
   return {
-    roleSuggestions: (data.roleSuggestions ?? []).slice(0, 3),
-    shape: (["leader", "builder", "specialist"] as const).includes(data.shape) ? data.shape : (u?.track ?? "builder"),
-    shapeReason: data.shapeReason ?? "",
-    defaultRole: data.defaultRole ?? data.roleSuggestions?.[0] ?? "",
+    roleSuggestions: (out.roleSuggestions ?? []).slice(0, 3),
+    shape: (["leader", "builder", "specialist"] as const).includes(out.shape) ? out.shape : (u?.track ?? "builder"),
+    shapeReason: out.shapeReason ?? "",
+    defaultRole: out.defaultRole ?? out.roleSuggestions?.[0] ?? "",
   };
 }
 

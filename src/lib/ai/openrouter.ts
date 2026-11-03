@@ -55,7 +55,9 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     temperature: opts.temperature ?? 0.4,
   };
   if (opts.json) body.response_format = { type: "json_object" };
-  if (opts.reasoning) body.reasoning = { effort: opts.reasoning === "none" ? "low" : opts.reasoning, exclude: true };
+  // Keep thinking short and out of the reply by default; models without the knob ignore it.
+  const effort = opts.reasoning ?? "low";
+  body.reasoning = { effort: effort === "none" ? "low" : effort, exclude: true };
   // Jev router and some providers reject unknown fields; keep the body minimal otherwise.
   const plugins: Record<string, unknown>[] = [...(opts.plugins ?? [])];
   if (opts.web) {
@@ -64,7 +66,9 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       id: "web",
       max_results: w.maxResults ?? config.web.maxResults,
     };
-    const engine = w.engine ?? config.web.engine;
+    let engine = w.engine ?? config.web.engine;
+    // "native" search only exists for a few providers; anything else would 404.
+    if (engine === "native" && !/^(google|openai|anthropic|perplexity|x-ai)\//.test(model)) engine = "exa";
     if (engine && engine !== "auto") plugin.engine = engine;
     if (w.includeDomains?.length) {
       plugin.include_domains = w.includeDomains;
